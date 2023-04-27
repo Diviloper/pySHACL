@@ -170,6 +170,15 @@ class Validator(object):
         shacl_graph: Optional[GraphLike] = None,
         ont_graph: Optional[GraphLike] = None,
         options: Optional[dict] = None,
+        validate_shapes: Optional[list] = [],
+        focus: Optional[
+            Union[
+                Tuple[Union[URIRef, BNode]],
+                List[Union[URIRef, BNode]],
+                Set[Union[URIRef, BNode]],
+                Union[URIRef, BNode],
+            ]
+        ] = None,
         **kwargs,
     ):
         options = options or {}
@@ -183,6 +192,8 @@ class Validator(object):
         self.data_graph = data_graph  # type: GraphLike
         self._target_graph = None
         self.ont_graph = ont_graph  # type: Optional[GraphLike]
+        self.validate_shapes = validate_shapes  # type: list
+        self.focus = focus
         self.data_graph_is_multigraph = isinstance(self.data_graph, (rdflib.Dataset, rdflib.ConjunctiveGraph))
         if self.ont_graph is not None and isinstance(self.ont_graph, (rdflib.Dataset, rdflib.ConjunctiveGraph)):
             self.ont_graph.default_union = True
@@ -275,8 +286,11 @@ class Validator(object):
                 apply_rules(advanced['rules'], g, iterate=iterate_rules)
             try:
                 for s in shapes:
+                    if s.node not in self.validate_shapes:
+                        continue
                     _is_conform, _reports = s.validate(
-                        g, abort_on_first=abort_on_first, allow_infos=allow_infos, allow_warnings=allow_warnings
+                        g, abort_on_first=abort_on_first, allow_infos=allow_infos, allow_warnings=allow_warnings,
+                        focus=self.focus
                     )
                     non_conformant = non_conformant or (not _is_conform)
                     reports.extend(_reports)
@@ -353,6 +367,15 @@ def validate(
     *args,
     shacl_graph: Optional[Union[GraphLike, str, bytes]] = None,
     ont_graph: Optional[Union[GraphLike, str, bytes]] = None,
+    validate_shapes: Optional[List[URIRef]] = [],
+    focus: Optional[
+        Union[
+            Tuple[Union[URIRef, BNode]],
+            List[Union[URIRef, BNode]],
+            Set[Union[URIRef, BNode]],
+            Union[URIRef, BNode],
+        ]
+    ] = None,
     advanced: Optional[bool] = False,
     inference: Optional[str] = None,
     inplace: Optional[bool] = False,
@@ -433,6 +456,8 @@ def validate(
             loaded_dg,
             shacl_graph=loaded_sg,
             ont_graph=loaded_og,
+            validate_shapes=validate_shapes,
+            focus=focus,
             options={
                 'inference': inference,
                 'inplace': inplace,

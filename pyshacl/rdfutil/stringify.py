@@ -4,10 +4,11 @@ from functools import wraps
 from typing import Iterator, List, Optional, Tuple, Union, cast
 
 import rdflib
-
 from rdflib.namespace import NamespaceManager
 
-from .consts import SH, RDF_first, RDFNode
+from .consts import OWL, SH, RDF_first, RDFNode
+
+OWLsameAs = OWL.sameAs
 
 
 def with_dict_cache(f):
@@ -32,7 +33,7 @@ def stringify_blank_node(
         raise RuntimeError("Can only stringify a blank node when graph is a rdflib.Graph")
     assert isinstance(graph, rdflib.Graph)
     assert isinstance(bnode, rdflib.BNode)
-    if recursion >= 9:
+    if recursion >= 12:
         return "<http://recursion.too.deep>"
     stringed_cache_key = id(graph), str(bnode)
 
@@ -70,8 +71,12 @@ def stringify_blank_node(
             continue
         o_texts = []
         for o in objs:
-            o_text = stringify_node(graph, o, ns_manager=ns_manager, recursion=recursion + 1)
-            o_texts.append(o_text)
+            if p is OWLsameAs and o is bnode:
+                # Avoid a crazy owl:sameAs recursion with self.
+                o_texts.append("<self>")
+            else:
+                o_text = stringify_node(graph, o, ns_manager=ns_manager, recursion=recursion + 1)
+                o_texts.append(o_text)
         if len(o_texts) > 1:
             o_texts.sort()
             o_text = ", ".join(o_texts)
@@ -166,8 +171,9 @@ def stringify_node(
 
 def stringify_graph(graph: rdflib.Graph):
     string_builder = ""
+    t: Tuple[rdflib.term.Node, rdflib.term.Node, rdflib.term.Node]
     for t in iter(graph):
-        n1, n2, n3 = t  # type: Tuple[rdflib.term.Node, rdflib.term.Node, rdflib.term.Node]
+        n1, n2, n3 = t
         node_string = stringify_node(graph, n1, ns_manager=graph.namespace_manager)
         string_builder += node_string + ", "
         node_string = stringify_node(graph, n2, ns_manager=graph.namespace_manager)

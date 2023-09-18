@@ -1,11 +1,9 @@
 import itertools
 import operator
-
 from typing import TYPE_CHECKING, List, Set, Union
 from warnings import warn
 
 import rdflib
-
 from rdflib import Literal, URIRef
 
 from pyshacl.consts import (
@@ -24,7 +22,6 @@ from pyshacl.consts import (
     SH_zeroOrOnePath,
 )
 from pyshacl.errors import ReportableRuntimeError, ShapeLoadError
-
 
 if TYPE_CHECKING:
     from pyshacl.pytypes import GraphLike, RDFNode
@@ -265,8 +262,8 @@ def nodes_from_node_expression(
             args_sets[i] = [None]
         args_permutations = list(itertools.product(*args_sets))
         responses = set()
-        for p in args_permutations:
-            result = function(data_graph, *p)
+        for permus in args_permutations:
+            result = function(data_graph, *permus)
             responses.add(result)
         return responses
     else:

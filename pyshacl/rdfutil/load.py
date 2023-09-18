@@ -5,7 +5,6 @@ import os
 import pickle
 import platform
 import sys
-
 from io import BufferedIOBase, BytesIO, TextIOBase, UnsupportedOperation
 from logging import WARNING, Logger, getLogger
 from pathlib import Path
@@ -14,9 +13,9 @@ from urllib import request
 from urllib.error import HTTPError
 
 import rdflib
+from rdflib.namespace import NamespaceManager
 
 from .clone import clone_dataset, clone_graph
-
 
 ConjunctiveLike = Union[rdflib.ConjunctiveGraph, rdflib.Dataset]
 GraphLike = Union[ConjunctiveLike, rdflib.Graph]
@@ -48,7 +47,8 @@ def get_rdf_from_web(url: Union[rdflib.URIRef, str]):
                 graph = rdflib.Graph(store=g_store, identifier=identifier)
                 kind = "graph"
             else:
-                graph = g
+                graph = rdflib.Graph()
+                graph.parse(g)
                 kind = None
         else:
             graph = g
@@ -69,7 +69,7 @@ def get_rdf_from_web(url: Union[rdflib.URIRef, str]):
         raise RuntimeError("Cannot pull RDF URL from the web: {}, code: {}".format(url, str(code)))
 
     filename = None
-    content_dispositions = resp.headers.get_all("Content-Disposition", [])
+    content_dispositions: List[str] = resp.headers.get_all("Content-Disposition", [])
     for c_d in content_dispositions:
         cd_parts = [s.strip() for s in str(c_d).split(',')]
         for cd_part in cd_parts:
@@ -81,7 +81,7 @@ def get_rdf_from_web(url: Union[rdflib.URIRef, str]):
         except Exception:
             pass
 
-    content_types = resp.headers.get_all('Content-Type', [])
+    content_types: List[str] = resp.headers.get_all('Content-Type', [])
     for content_type in content_types:
         ct_parts = [s.strip() for s in str(content_type).split(',')]
         for ct_part in ct_parts:
@@ -101,7 +101,7 @@ def get_rdf_from_web(url: Union[rdflib.URIRef, str]):
                 continue
             break
 
-    transfer_encodings = resp.headers.get_all('Transfer-Encoding', [])
+    transfer_encodings: List[str] = resp.headers.get_all('Transfer-Encoding', [])
     for t_e in transfer_encodings:
         te_parts = [s.strip() for s in str(t_e).split(',')]
         for check in ('chunked', 'compress', 'deflate', 'gzip', 'x-gzip'):
@@ -282,7 +282,12 @@ def load_from_source(
         if source_is_graph:
             target_g: Union[rdflib.Graph, rdflib.ConjunctiveGraph, rdflib.Dataset] = source  # type: ignore
         else:
-            target_g = rdflib.Dataset() if multigraph else rdflib.Graph()
+            if multigraph:
+                target_g = rdflib.Dataset()
+                target_g.namespace_manager = NamespaceManager(target_g, 'core')
+                target_g.default_context.namespace_manager = target_g.namespace_manager
+            else:
+                target_g = rdflib.Graph(bind_namespaces='core')
     else:
         if not isinstance(g, (rdflib.Graph, rdflib.Dataset, rdflib.ConjunctiveGraph)):
             raise RuntimeError("Passing in 'g' must be a rdflib Graph or Dataset.")

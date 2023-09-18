@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from rdflib.namespace import XSD, Namespace
 
-
 RDF_PFX = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
 RDFS_PFX = 'http://www.w3.org/2000/01/rdf-schema#'
 OWL_PFX = 'http://www.w3.org/2002/07/owl#'
@@ -121,6 +120,7 @@ SH_optional = SH.optional
 SH_js = SH.js
 SH_jsFunctionName = SH.jsFunctionName
 SH_jsLibrary = SH.jsLibrary
+SH_detail = SH.detail
 
 # For env var truth comparisons
 env_truths = ("t", "T", "y", "Y", "1", "True", "true", "TRUE", "yes", "YES", 1, True)

@@ -5,6 +5,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Python PEP 440 Versioning](https://www.python.org/dev/peps/pep-0440/).
 
 ## [Unreleased]
+- Nothing yet.
+
+
+## [0.23.0] - 2023-05-23
+### Added
+- Added Python 3.11 support (use it, internal benchmarking shows its 25-30% faster than Python 3.8)
+- `sh:node` NodeConstraint now includes details of its child validation results, that were normally not included in the validation report.
+  - exposed via the `sh:detail` property on the NodeConstraint validation report
+
+### Changed
+- Added compatibility with Python 3.11, this requires:
+  - RDFLib v6.3 or greater (recommended v6.3.2)
+  - PyDuktape v0.4.3 for python 3.11 support
+  - Poetry v1.5.0 (or poetry-core v1.6.0)
+- Graph Namespace manager now only registers 'core' namespaces, this avoids having inconsistencies and incompatibilities with your own namespaces.
+- Replaced Flake8 and isort with Ruff
+- Updated to latest Black version for formatting
+
+### Fixed
+- Extend ontology inoculation to include triples where NamedIndividual URI is object.
+- Re-black all files, re-sort with new Ruff isort, fix some Mypy typing inconsistencies
+
+
+## [0.22.2] - 2023-04-27
+
+### In this release:
+
+### Fixed
+- Inoculating the datagraph using an extra ontology graph now copies over any missing namespace prefixes from the ontology graph to the datagraph.
+  - This is to match old ontology-graph-mixin behaviour that had this side-effect.
+  - Added a test to ensure this behaviour is not broken again.
+- Stringifying nodes in `QualifiedValueShape` default message was using wrong stringification operation.
+
+## [0.22.1] - 2023-04-26
+
+### In this release:
+
+### Fixed
+- Clone full contents of an `OWL:NamedIndividual` from the ontology graph to the datagraph, during the inoculation procedure.
+  - This fixes the case where an NamedIndividual in an OWL ontology had properties that were required in the datagraph at runtime to ensure successful validation
+- Avoid hitting the recursion limit when stringifying a blank node, when OWL inferencing has inserted owl:sameAs the same blank node as is being serialized.
+- Avoid hitting the recursion limit when cloning a graph with a blank node, when OWL inferencing has inserted owl:sameAs the same blank node as is being cloned.
+
+### Added
+- Added a default message for `QualifiedValueShape` constraint component. It never had one before.
+
+### Changed
+- Lots more debug messaging. Debugging is now _much_ more verbose.
+  - This gives more insight into how PySHACL runs, what it is doing, and how long each step takes.
+  - All constraint evaluations will now output their results, regardless of whether are conformant or non-conformant or if they are used in the final conformance report.
+  - You will probably want debug turned off unless you are tracking down the source of a problem or performance issue.
+
 
 ## [0.22.0] - 2023-04-18
 
@@ -18,7 +70,6 @@ and this project adheres to [Python PEP 440 Versioning](https://www.python.org/d
   - Such as cases where the Shapes graph and Extra-ontology graph are the same graph, but having SHACL Shapes and constraints in the datagraph is undesired.
 - Details around automatically cloning the datagraph before modification (inoculation) remain unchanged.
 - If you preferred the old behaviour, where the _whole_ extra-ontology file was mixed-in to the datafile, please file a Github issue outlining your need for that.
-
 
 
 ## [0.21.0] - 2023-03-31
@@ -1004,7 +1055,10 @@ just leaves the files open. Now it is up to the command-line client to close the
 
 - Initial version, limited functionality
 
-[Unreleased]: https://github.com/RDFLib/pySHACL/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/RDFLib/pySHACL/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/RDFLib/pySHACL/compare/v0.22.2...v0.23.0
+[0.22.2]: https://github.com/RDFLib/pySHACL/compare/v0.22.1...v0.22.2
+[0.22.1]: https://github.com/RDFLib/pySHACL/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/RDFLib/pySHACL/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/RDFLib/pySHACL/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/RDFLib/pySHACL/compare/v0.19.1...v0.20.0

@@ -2,14 +2,12 @@
 #
 import logging
 import sys
-
 from functools import wraps
 from os import getenv, path
 from sys import stderr
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union, cast
 
 import rdflib
-
 from rdflib import BNode, Literal, URIRef
 from rdflib.util import from_n3
 
@@ -20,6 +18,7 @@ from .consts import (
     RDF_type,
     RDFS_Resource,
     SH_conforms,
+    SH_detail,
     SH_result,
     SH_resultMessage,
     SH_ValidationReport,
@@ -47,7 +46,6 @@ from .rules import apply_rules, gather_rules
 from .shapes_graph import ShapesGraph
 from .target import apply_target_types, gather_target_types
 
-
 USE_FULL_MIXIN = getenv("PYSHACL_USE_FULL_MIXIN") in env_truths
 
 log_handler = logging.StreamHandler(stderr)
@@ -62,6 +60,7 @@ log_handler.setLevel(logging.INFO)
 class Validator(object):
     @classmethod
     def _load_default_options(cls, options_dict: dict):
+        options_dict.setdefault('debug', False)
         options_dict.setdefault('advanced', False)
         options_dict.setdefault('inference', 'none')
         options_dict.setdefault('inplace', False)
@@ -72,6 +71,8 @@ class Validator(object):
         options_dict.setdefault('allow_warnings', False)
         if 'logger' not in options_dict:
             options_dict['logger'] = logging.getLogger(__name__)
+            if options_dict['debug']:
+                options_dict['logger'].setLevel(logging.DEBUG)
 
     @classmethod
     def _run_pre_inference(
@@ -134,7 +135,7 @@ class Validator(object):
             raise RuntimeError("A Non-Conformant Validation Report must have at least one result.")
         if result_len > 0:
             v_text += "Results ({}):\n".format(str(result_len))
-        vg = rdflib.Graph()
+        vg = rdflib.Graph(bind_namespaces='core')
         for p, n in sg.graph.namespace_manager.namespaces():
             vg.namespace_manager.bind(p, n)
         vr = BNode()
@@ -185,6 +186,7 @@ class Validator(object):
         self._load_default_options(options)
         self.options = options  # type: dict
         self.logger = options['logger']  # type: logging.Logger
+        self.debug = options['debug']
         self.pre_inferenced = kwargs.pop('pre_inferenced', False)
         self.inplace = options['inplace']
         if not isinstance(data_graph, rdflib.Graph):
@@ -201,7 +203,7 @@ class Validator(object):
         if shacl_graph is None:
             shacl_graph = clone_graph(data_graph, identifier='shacl')
         assert isinstance(shacl_graph, rdflib.Graph), "shacl_graph must be a rdflib Graph object"
-        self.shacl_graph = ShapesGraph(shacl_graph, self.logger)  # type: ShapesGraph
+        self.shacl_graph = ShapesGraph(shacl_graph, self.debug, self.logger)  # type: ShapesGraph
 
         if options['use_js']:
             is_js_installed = check_extra_installed('js')
@@ -231,30 +233,38 @@ class Validator(object):
         else:
             has_cloned = False
             if self.ont_graph is not None:
+                self.logger.debug("Cloning DataGraph to temporary memory graph, to add ontology definitions.")
                 # creates a copy of self.data_graph, doesn't modify it
                 the_target_graph = self.mix_in_ontology()
                 has_cloned = True
             else:
                 the_target_graph = self.data_graph
             inference_option = self.options.get('inference', 'none')
+            if self.inplace and self.debug:
+                self.logger.debug("Skipping DataGraph clone because inplace option is passed.")
             if inference_option and not self.pre_inferenced and str(inference_option) != "none":
                 if not has_cloned and not self.inplace:
+                    self.logger.debug("Cloning DataGraph to temporary memory graph before pre-inferencing.")
                     the_target_graph = clone_graph(the_target_graph)
                     has_cloned = True
-                self._run_pre_inference(the_target_graph, inference_option, self.logger)
+                self.logger.debug(f"Running pre-inferencing with option='{inference_option}'.")
+                self._run_pre_inference(the_target_graph, inference_option, logger=self.logger)
                 self.pre_inferenced = True
             if not has_cloned and not self.inplace and self.options['advanced']:
                 # We still need to clone in advanced mode, because of triple rules
+                self.logger.debug("Forcing clone of DataGraph because advanced mode is enabled.")
                 the_target_graph = clone_graph(the_target_graph)
                 has_cloned = True
             if not has_cloned and not self.inplace:
                 # No inferencing, no ont_graph, and no advanced mode, now implies inplace mode
+                self.logger.debug("Running validation in-place, without modifying the DataGraph.")
                 self.inplace = True
             self._target_graph = the_target_graph
 
         shapes = self.shacl_graph.shapes  # This property getter triggers shapes harvest.
         iterate_rules = self.options.get("iterate_rules", False)
         if self.options['advanced']:
+            self.logger.debug("Activating SHACL-AF Features.")
             target_types = gather_target_types(self.shacl_graph)
             advanced = {
                 'functions': gather_functions(self.shacl_graph),
@@ -280,7 +290,15 @@ class Validator(object):
         allow_warnings: bool = bool(self.options.get("allow_warnings", False))
         non_conformant = False
         aborted = False
+        if abort_on_first and self.debug:
+            self.logger.debug(
+                "Abort on first error is enabled. Will exit at end of first Shape that fails validation."
+            )
+        if self.debug:
+            self.logger.debug(f"Will run validation on {len(named_graphs)} named graph/s.")
         for g in named_graphs:
+            if self.debug:
+                self.logger.debug(f"Validating DataGraph named {g.identifier}")
             if advanced:
                 apply_functions(advanced['functions'], g)
                 apply_rules(advanced['rules'], g, iterate=iterate_rules)
@@ -410,7 +428,8 @@ def validate(
     :return:
     """
 
-    if kwargs.get('debug', False):
+    do_debug = kwargs.get('debug', False)
+    if do_debug:
         log_handler.setLevel(logging.DEBUG)
         log.setLevel(logging.DEBUG)
     apply_patches()
@@ -421,17 +440,19 @@ def validate(
         to_meta_val = shacl_graph or data_graph
         conforms, v_r, v_t = meta_validate(to_meta_val, inference=inference, **kwargs)
         if not conforms:
-            msg = "Shacl File does not validate against the Shacl Shapes Shacl file.\n{}".format(v_t)
+            msg = f"SHACL File does not validate against the SHACL Shapes SHACL (MetaSHACL) file.\n{v_t}"
             log.error(msg)
             raise ReportableRuntimeError(msg)
     do_owl_imports = kwargs.pop('do_owl_imports', False)
     data_graph_format = kwargs.pop('data_graph_format', None)
     # force no owl imports on data_graph
-    loaded_dg = load_from_source(data_graph, rdf_format=data_graph_format, multigraph=True, do_owl_imports=False)
+    loaded_dg = load_from_source(
+        data_graph, rdf_format=data_graph_format, multigraph=True, do_owl_imports=False, logger=log
+    )
     ont_graph_format = kwargs.pop('ont_graph_format', None)
     if ont_graph is not None:
         loaded_og = load_from_source(
-            ont_graph, rdf_format=ont_graph_format, multigraph=True, do_owl_imports=do_owl_imports
+            ont_graph, rdf_format=ont_graph_format, multigraph=True, do_owl_imports=do_owl_imports, logger=log
         )
     else:
         loaded_og = None
@@ -439,7 +460,7 @@ def validate(
     if shacl_graph is not None:
         rdflib_bool_patch()
         loaded_sg = load_from_source(
-            shacl_graph, rdf_format=shacl_graph_format, multigraph=True, do_owl_imports=do_owl_imports
+            shacl_graph, rdf_format=shacl_graph_format, multigraph=True, do_owl_imports=do_owl_imports, logger=log
         )
         rdflib_bool_unpatch()
     else:
@@ -459,6 +480,7 @@ def validate(
             validate_shapes=validate_shapes,
             focus=focus,
             options={
+                'debug': do_debug or False,
                 'inference': inference,
                 'inplace': inplace,
                 'abort_on_first': abort_on_first,
@@ -495,6 +517,7 @@ def validate(
 def clean_validation_reports(actual_graph, actual_report, expected_graph, expected_report):
     # remove rdfs-added stuff
     # remove resultMessage if expected_report does not include result_message
+    # remove sh:detail if expected_report does not include details
     # expected_graph.remove((expected_report, RDF_type, RDFS_Resource))
     # actual_graph.remove((actual_report, RDF_type, RDFS_Resource))
     expected_graph.remove((None, RDF_type, RDFS_Resource))
@@ -502,9 +525,11 @@ def clean_validation_reports(actual_graph, actual_report, expected_graph, expect
     expected_results = list(expected_graph.objects(expected_report, SH_result))
     actual_results = list(actual_graph.objects(actual_report, SH_result))
     er_has_messages = None
+    er_has_details = False
     for er in expected_results:
         expected_graph.remove((er, RDF_type, RDFS_Resource))
         er_has_messages = list(expected_graph.objects(er, SH_resultMessage))
+        er_has_details = er_has_details or expected_graph.value(er, SH_detail) is not None
         # sourceShapes = list(expected_graph.objects(er, SH_sourceShape))
         # for s in sourceShapes:
         #     expected_graph.remove((s, RDF_type, RDFS_Resource))
@@ -520,6 +545,12 @@ def clean_validation_reports(actual_graph, actual_report, expected_graph, expect
     else:
         for ar in actual_results:
             actual_graph.remove((ar, SH_resultMessage, None))
+    if not er_has_details:
+        # If no expected result had details, remove all details from actual
+        for ar in actual_results:
+            for detail in actual_graph.objects(ar, SH_detail):
+                actual_graph -= actual_graph.cbd(detail)
+                actual_graph.remove((ar, SH_detail, detail))
     return True
 
 

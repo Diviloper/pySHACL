@@ -6,7 +6,6 @@ https://www.w3.org/TR/shacl/#core-components-value-type
 import abc
 import re
 import typing
-
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from rdflib import BNode, Literal, URIRef
@@ -36,7 +35,6 @@ from pyshacl.errors import ConstraintLoadError
 from pyshacl.parameter import SHACLParameter
 from pyshacl.pytypes import GraphLike
 from pyshacl.rdfutil import stringify_node
-
 
 if TYPE_CHECKING:
     from pyshacl.pytypes import RDFNode
@@ -284,7 +282,6 @@ class ConstraintComponent(object, metaclass=abc.ABCMeta):
             extra_messages=extra_messages,
             bound_vars=bound_vars,
         )
-        self.shape.logger.debug(desc)
         return desc, r_node, r_triples
 
     def _format_sparql_based_result_message(self, msg, bound_vars):
@@ -307,7 +304,7 @@ class ConstraintComponent(object, metaclass=abc.ABCMeta):
             fdict.update(bound_vars)
         else:
             return msg
-        for (var, val) in fdict.items():
+        for var, val in fdict.items():
             substring = "{{[?$]{}}}".format(var)
             msg = re.sub(substring, str(val), msg)
         return msg

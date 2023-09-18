@@ -1,10 +1,18 @@
 from itertools import chain
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Dict, Optional, Union
 
 import rdflib
+from rdflib.namespace import NamespaceManager
 
-from .clone import clone_blank_node, clone_graph
-from .consts import RDF, ConjunctiveLike, GraphLike, OWL_classes, OWL_properties, RDFS_classes, RDFS_properties
+from .clone import clone_blank_node, clone_graph, clone_node
+from .consts import OWL, RDF, ConjunctiveLike, GraphLike, OWL_classes, OWL_properties, RDFS_classes, RDFS_properties
+
+if TYPE_CHECKING:
+    from rdflib import BNode
+
+    from .consts import RDFNode
+
+OWLNamedIndividual = OWL.NamedIndividual
 
 
 def inoculate(data_graph: rdflib.Graph, ontology: rdflib.Graph):
@@ -18,7 +26,17 @@ def inoculate(data_graph: rdflib.Graph, ontology: rdflib.Graph):
     :return:
     :rtype:
     """
-    copied_bnode_map = {}
+    copied_bnode_map: Dict[RDFNode, BNode] = {}
+    copied_named_map: Dict[RDFNode, Union[BNode, RDFNode]] = {}
+    ontology_ns = ontology.namespace_manager
+    data_graph_ns = data_graph.namespace_manager
+
+    # Bind any missing ontology namespaces in the DataGraph NS manager.
+    if ontology_ns is not data_graph_ns:
+        data_graph_prefixes = {p: n for (p, n) in data_graph_ns.namespaces()}
+        for p, n in ontology_ns.namespaces():
+            if p not in data_graph_prefixes:
+                data_graph_ns.bind(p, n)
 
     for ont_class in chain(RDFS_classes, OWL_classes):
         found_s = list(ontology.subjects(RDF.type, ont_class))
@@ -29,35 +47,61 @@ def inoculate(data_graph: rdflib.Graph, ontology: rdflib.Graph):
                 else:
                     new_bnode = clone_blank_node(ontology, s, data_graph)
                     copied_bnode_map[s] = new_bnode
-                new_s = new_bnode
+                data_graph.add((new_bnode, RDF.type, ont_class))
             else:
-                new_s = s
-            data_graph.add((new_s, RDF.type, ont_class))
+                if ont_class is OWLNamedIndividual:
+                    if s in copied_named_map:
+                        new_s = copied_named_map[s]
+                    else:
+                        # Whole node of NamedIndividual needs to be cloned
+                        new_s = clone_node(ontology, s, data_graph, deep_clone=True)
+                        copied_named_map[s] = new_s
+                else:
+                    # Shallow-copy this node from the ontology graph to the data graph
+                    new_s = clone_node(ontology, s, data_graph, deep_clone=False)
+                data_graph.add((new_s, RDF.type, ont_class))
 
     for ont_property in chain(RDFS_properties, OWL_properties):
         found_s_o = list(ontology.subject_objects(ont_property))
-        for s, o in found_s_o:
-            if isinstance(s, rdflib.BNode):
-                if s in copied_bnode_map:
-                    new_bnode = copied_bnode_map[s]
+        for s2, o2 in found_s_o:
+            if isinstance(s2, rdflib.BNode):
+                if s2 in copied_bnode_map:
+                    new_bnode = copied_bnode_map[s2]
                 else:
-                    new_bnode = clone_blank_node(ontology, s, data_graph)
-                    copied_bnode_map[s] = new_bnode
+                    new_bnode = clone_blank_node(ontology, s2, data_graph)
+                    copied_bnode_map[s2] = new_bnode
                 new_s = new_bnode
             else:
-                new_s = s
-
-            if isinstance(o, rdflib.BNode):
-                if o in copied_bnode_map:
-                    new_bnode = copied_bnode_map[o]
+                new_s = s2
+            if isinstance(o2, rdflib.BNode):
+                if o2 in copied_bnode_map:
+                    new_bnode = copied_bnode_map[o2]
                 else:
-                    new_bnode = clone_blank_node(ontology, o, data_graph)
-                    copied_bnode_map[o] = new_bnode
-                new_o = new_bnode
+                    new_bnode = clone_blank_node(ontology, o2, data_graph)
+                    copied_bnode_map[o2] = new_bnode
+                data_graph.add((new_s, ont_property, new_bnode))
             else:
-                new_o = o
+                data_graph.add((new_s, ont_property, o2))
 
-            data_graph.add((new_s, ont_property, new_o))
+    # Finally add in any triples where a known NamedIndividual is the Object.
+    for ni in copied_named_map.keys():
+        found_s_p = list(ontology.subject_predicates(object=ni))
+        for s3, p3 in found_s_p:
+            if isinstance(p3, (rdflib.Literal, rdflib.BNode)):
+                # predicates pointing to NamedIndividual should not be BNode or Literal
+                continue
+            if isinstance(s3, rdflib.BNode):
+                if s3 in copied_bnode_map:
+                    new_bnode = copied_bnode_map[s3]
+                else:
+                    new_bnode = clone_blank_node(ontology, s3, data_graph)
+                    copied_bnode_map[s3] = new_bnode
+                new_s = new_bnode
+            else:
+                new_s = s3
+
+            data_graph.add((new_s, p3, ni))
+
     return data_graph
 
 
@@ -83,6 +127,8 @@ def inoculate_dataset(
     base_default_context = base_ds.default_context.identifier
     if target_ds is None:
         target_ds = rdflib.Dataset(default_union=default_union)
+        target_ds.namespace_manager = NamespaceManager(target_ds, 'core')
+        target_ds.default_context.namespace_manager = target_ds.namespace_manager
     elif target_ds == "inplace" or target_ds == "base":
         target_ds = base_ds
     elif isinstance(target_ds, str):
